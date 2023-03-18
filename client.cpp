@@ -2,6 +2,7 @@
 #include <boost/asio.hpp>
 #include "net/connection.h"
 #include "net/thread_safe_queue.h"
+#include "net/message.h"
 
 using namespace boost::asio;
 using namespace boost::system;

@@ -19,7 +19,7 @@ public:
     virtual ~Server()
     {
         Stop();
-        std::cout << "Server stopped!" << std::endl;
+        std::cout << "[Server] stopped!" << std::endl;
     }
 
     bool Start()
@@ -36,7 +36,7 @@ public:
             return false;
         }
         
-        std::cout << "Server started!" << std::endl;
+        std::cout << "[Server] started!" << std::endl;
         return true;
     }
     void Stop()
@@ -70,22 +70,22 @@ public:
                 {
                     _connections.push_back(std::move(con));
                     _connections.back() -> ConnectToClient(ID++);
-                    std::cout << _connections.back() -> getID() << " connection approved" << std::endl;
+                    std::cout << _connections.back() -> GetID() << " connection approved" << std::endl;
                 }
                 else
                 {
-                    std::cout << "connection denied."
+                    std::cout << "connection denied.";
                 }
             }
             else
             {
-                std::cout << "Connection error: " << ec.message << std::endl;
+                std::cout << "Connection error: " << ec.message() << std::endl;
             }
         });
         WaitForConnection();
     }
 
-    void MessageClient(std::shared_ptr<Connection> client, const std::string& msg)
+    void MessageClient(std::shared_ptr<Connection> client, const Message& msg)
     {
         if(client && client -> IsConnected())
         {
@@ -98,7 +98,7 @@ public:
 
         }
     }
-    void MessageAll(const std::string& msg, std::shared_ptr<Connection> ignoredClient = nullptr)
+    void MessageAll(const Message& msg, std::shared_ptr<Connection> ignoredClient = nullptr)
     {
         bool invalid = false;
 
@@ -119,7 +119,7 @@ public:
 
     }
 private:
-    TSQueue<std::string> _serverQueue;
+    TSQueue<Message> _serverQueue;
     std::deque<std::shared_ptr<Connection>> _connections;
     io_context _context;
     std::thread _serverThread;
@@ -129,6 +129,9 @@ private:
 private:
     bool canBeAccepted(std::shared_ptr<Connection> client)
     {
-
+        return true;
     }
 };
+
+int main()
+{}
