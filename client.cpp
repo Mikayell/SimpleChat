@@ -1,68 +1,153 @@
-#include <iostream>
-#include <boost/asio.hpp>
-#include "net/connection.h"
-#include "net/thread_safe_queue.h"
-#include "net/message.h"
+#include "common_headers.h"
 
-using namespace boost::asio;
-using namespace boost::system;
+using boost::asio::ip::tcp;
 
-
-class Client
+class client
 {
-
 public:
-    Client()
-    : _socket(_context)
-    {}
-
-    virtual ~Client()
+    client(const std::array<char, MAX_NICKNAME_SIZE>& nickname,
+            boost::asio::io_context& io_context,
+            tcp::resolver::iterator endpoint_iterator) :
+            io_context_(io_context), socket_(io_context)
     {
-        Disconnect();
+
+        strcpy(nickname_.data(), nickname.data());
+        memset(read_msg_.data(), '\0', MAX_IP_PACK_SIZE);
+        boost::asio::async_connect(socket_, endpoint_iterator, boost::bind(&client::onConnect, this, _1));
     }
 
-public:
-
-    bool Connect(const std::string& host, const int& port)
+    void write(const std::array<char, MAX_IP_PACK_SIZE>& msg)
     {
-        try
-        {
-            _connection = std::make_unique<Connection>();
-
-            ip::tcp::resolver resolver(_context);
-            auto endpoint = resolver.resolve(host, std::to_string(port));
-            _connection -> ConnectToServer(endpoint);           // Connection method to be defined
-            _thread = std::thread([this](){_context.run();});
-
-        }
-        catch(const std::exception& e)
-        {
-            std::cerr << e.what() << '\n';
-            return false;
-        }
-        
+        io_context_.post(boost::bind(&client::writeImpl, this, msg));
     }
-    bool Disconnect()
+
+    void close()
     {
-        if(IsConnected())
-            _connection -> Disconnect();  // Connection method to be defined
-        
-        _context.stop();    // we are done with context, and should stop it
-
-        if(_thread.joinable())
-            _thread.join();
-        
-        _connection.release(); // delete the unique pointer(Connection)
-        
+        io_context_.post(boost::bind(&client::closeImpl, this));
     }
-    bool IsConnected();
 
 private:
 
-    TSQueue<std::string> _queue; // thread safe queue: to be defined
+    void onConnect(const boost::system::error_code& error)
+    {
+        if (!error)
+        {
+            boost::asio::async_write(socket_,
+                                     boost::asio::buffer(nickname_, nickname_.size()),
+                                     boost::bind(&client::readHandler, this, _1));
+        }
+    }
 
-    io_context _context;
-    std::thread _thread;
-    ip::tcp::socket _socket;
-    std::unique_ptr<Connection> _connection;
+    void readHandler(const boost::system::error_code& error)
+    {
+        std::cout << read_msg_.data() << std::endl;
+        if (!error)
+        {
+            boost::asio::async_read(socket_,
+                                    boost::asio::buffer(read_msg_, read_msg_.size()),
+                                    boost::bind(&client::readHandler, this, _1));
+        } else
+        {
+            closeImpl();
+        }
+    }
+
+    void writeImpl(std::array<char, MAX_IP_PACK_SIZE> msg)
+    {
+        bool write_in_progress = !write_msgs_.empty();
+        write_msgs_.push_back(msg);
+        if (!write_in_progress)
+        {
+            boost::asio::async_write(socket_,
+                                     boost::asio::buffer(write_msgs_.front(), write_msgs_.front().size()),
+                                     boost::bind(&client::writeHandler, this, _1));
+        }
+    }
+
+    void writeHandler(const boost::system::error_code& error)
+    {
+        if (!error)
+        {
+            write_msgs_.pop_front();
+            if (!write_msgs_.empty())
+            {
+                boost::asio::async_write(socket_,
+                                         boost::asio::buffer(write_msgs_.front(), write_msgs_.front().size()),
+                                         boost::bind(&client::writeHandler, this, _1));
+            }
+        } else
+        {
+            closeImpl();
+        }
+    }
+
+    void closeImpl()
+    {
+        socket_.close();
+    }
+
+    boost::asio::io_context& io_context_;
+    tcp::socket socket_;
+    std::array<char, MAX_IP_PACK_SIZE> read_msg_;
+    std::deque<std::array<char, MAX_IP_PACK_SIZE>> write_msgs_;
+    std::array<char, MAX_NICKNAME_SIZE> nickname_;
 };
+
+int main(int argc, char* argv[])
+{
+    try
+    {
+        if (argc != 4)
+        {
+            std::cerr << "Usage: chat_client <nickname> <host> <port>\n";
+            return 1;
+        }
+        boost::asio::io_context io_context;
+        tcp::resolver resolver(io_context);
+        tcp::resolver::query query(argv[2], argv[3]);
+        tcp::resolver::iterator iterator = resolver.resolve(query);
+        std::array<char, MAX_NICKNAME_SIZE> nickname;
+        strcpy(nickname.data(), argv[1]);
+
+        client cli(nickname, io_context, iterator);
+
+        std::thread t(boost::bind(&boost::asio::io_context::run, &io_context));
+
+        std::array<char, MAX_IP_PACK_SIZE> msg;
+
+        while (true)
+        {
+            memset(msg.data(), '\0', msg.size());
+            if (!std::cin.getline(msg.data(), MAX_IP_PACK_SIZE - PADDING - MAX_NICKNAME_SIZE))
+            {
+                std::cin.clear(); //clean up error bit and try to finish reading
+            }
+            cli.write(msg);
+        }
+
+        // uncomment the following and comment out the above while(true), for testing purpose
+        /*
+         char line[MAX_IP_PACK_SIZE - 32] = "This is a testing line to see if any splits.";
+         int i=0;
+         while(i<1000)
+         {
+         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+         memset(msg.data(), '\0', MAX_IP_PACK_SIZE);
+         strcpy(msg.data(), std::to_string(i).c_str());
+         strcat(msg.data(), std::string(" ").c_str());
+         strcat(msg.data(), line);
+         cli.write(msg);
+         ++i;
+         }
+         std::cout << "finished" << std::endl;
+         */
+
+        cli.close();
+        t.join();
+    } catch (std::exception& e)
+    {
+        std::cerr << "Exception: " << e.what() << "\n";
+    }
+
+    return 0;
+}
