@@ -20,12 +20,13 @@ else()
   set(CMAKE_CXX_CLANG_TIDY ${CMAKE_CXX_CLANG_TIDY_EXECUTABLE})
 endif()
 
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost REQUIRED COMPONENTS system thread)
 
 add_executable(server server.cpp)
 target_link_libraries(server
  PRIVATE
- Boost::system)
+ Boost::system
+ Boost::thread)
 
  add_executable(client client.cpp)
  target_link_libraries(client

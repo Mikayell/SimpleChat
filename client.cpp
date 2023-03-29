@@ -125,23 +125,6 @@ int main(int argc, char* argv[])
             cli.write(msg);
         }
 
-        // uncomment the following and comment out the above while(true), for testing purpose
-        /*
-         char line[MAX_IP_PACK_SIZE - 32] = "This is a testing line to see if any splits.";
-         int i=0;
-         while(i<1000)
-         {
-         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-         memset(msg.data(), '\0', MAX_IP_PACK_SIZE);
-         strcpy(msg.data(), std::to_string(i).c_str());
-         strcat(msg.data(), std::string(" ").c_str());
-         strcat(msg.data(), line);
-         cli.write(msg);
-         ++i;
-         }
-         std::cout << "finished" << std::endl;
-         */
-
         cli.close();
         t.join();
     } catch (std::exception& e)
