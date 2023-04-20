@@ -4,7 +4,6 @@
     "builtin-baseline": "a7b6122f6b6504d16d96117336a0562693579933",
     "dependencies": [
         "boost-asio",
-        "boost-thread"
+	"boost-thread"
     ]
 }
-

@@ -1,97 +1,8 @@
 #include "common_headers.h"
+#include "client.h"
 
 using boost::asio::ip::tcp;
-
-class client
-{
-public:
-    client(const std::array<char, MAX_NICKNAME_SIZE>& nickname,
-            boost::asio::io_context& io_context,
-            tcp::resolver::iterator endpoint_iterator) :
-            io_context_(io_context), socket_(io_context)
-    {
-
-        strcpy(nickname_.data(), nickname.data());
-        memset(read_msg_.data(), '\0', MAX_IP_PACK_SIZE);
-        boost::asio::async_connect(socket_, endpoint_iterator, boost::bind(&client::onConnect, this, _1));
-    }
-
-    void write(const std::array<char, MAX_IP_PACK_SIZE>& msg)
-    {
-        io_context_.post(boost::bind(&client::writeImpl, this, msg));
-    }
-
-    void close()
-    {
-        io_context_.post(boost::bind(&client::closeImpl, this));
-    }
-
-private:
-
-    void onConnect(const boost::system::error_code& error)
-    {
-        if (!error)
-        {
-            boost::asio::async_write(socket_,
-                                     boost::asio::buffer(nickname_, nickname_.size()),
-                                     boost::bind(&client::readHandler, this, _1));
-        }
-    }
-
-    void readHandler(const boost::system::error_code& error)
-    {
-        std::cout << read_msg_.data() << std::endl;
-        if (!error)
-        {
-            boost::asio::async_read(socket_,
-                                    boost::asio::buffer(read_msg_, read_msg_.size()),
-                                    boost::bind(&client::readHandler, this, _1));
-        } else
-        {
-            closeImpl();
-        }
-    }
-
-    void writeImpl(std::array<char, MAX_IP_PACK_SIZE> msg)
-    {
-        bool write_in_progress = !write_msgs_.empty();
-        write_msgs_.push_back(msg);
-        if (!write_in_progress)
-        {
-            boost::asio::async_write(socket_,
-                                     boost::asio::buffer(write_msgs_.front(), write_msgs_.front().size()),
-                                     boost::bind(&client::writeHandler, this, _1));
-        }
-    }
-
-    void writeHandler(const boost::system::error_code& error)
-    {
-        if (!error)
-        {
-            write_msgs_.pop_front();
-            if (!write_msgs_.empty())
-            {
-                boost::asio::async_write(socket_,
-                                         boost::asio::buffer(write_msgs_.front(), write_msgs_.front().size()),
-                                         boost::bind(&client::writeHandler, this, _1));
-            }
-        } else
-        {
-            closeImpl();
-        }
-    }
-
-    void closeImpl()
-    {
-        socket_.close();
-    }
-
-    boost::asio::io_context& io_context_;
-    tcp::socket socket_;
-    std::array<char, MAX_IP_PACK_SIZE> read_msg_;
-    std::deque<std::array<char, MAX_IP_PACK_SIZE>> write_msgs_;
-    std::array<char, MAX_NICKNAME_SIZE> nickname_;
-};
+using namespace boost::asio;
 
 int main(int argc, char* argv[])
 {
@@ -99,38 +10,117 @@ int main(int argc, char* argv[])
     {
         if (argc != 4)
         {
-            std::cerr << "Usage: chat_client <nickname> <host> <port>\n";
+            std::cerr << "Use: client <nickname> <localhost> <port>\n";
             return 1;
         }
-        boost::asio::io_context io_context;
-        tcp::resolver resolver(io_context);
+
+        io_context context;
+        tcp::resolver resolver(context);
         tcp::resolver::query query(argv[2], argv[3]);
         tcp::resolver::iterator iterator = resolver.resolve(query);
         std::array<char, MAX_NICKNAME_SIZE> nickname;
         strcpy(nickname.data(), argv[1]);
 
-        client cli(nickname, io_context, iterator);
+        Client client(nickname, context, iterator);
 
-        std::thread t(boost::bind(&boost::asio::io_context::run, &io_context));
+        std::thread mainThread([&context](){context.run();});
 
-        std::array<char, MAX_IP_PACK_SIZE> msg;
+        std::array<char, MAX_PACK_SIZE> msg;
 
         while (true)
         {
             memset(msg.data(), '\0', msg.size());
-            if (!std::cin.getline(msg.data(), MAX_IP_PACK_SIZE - PADDING - MAX_NICKNAME_SIZE))
+            if (!std::cin.getline(msg.data(), MAX_PACK_SIZE - PADDING - MAX_NICKNAME_SIZE))
             {
-                std::cin.clear(); //clean up error bit and try to finish reading
+                std::cin.clear();
             }
-            cli.write(msg);
+            client.Write(msg);
         }
 
-        cli.close();
-        t.join();
+        client.Close();
+
+        mainThread.join();
+
     } catch (std::exception& e)
     {
         std::cerr << "Exception: " << e.what() << "\n";
     }
 
     return 0;
+}
+
+
+Client::Client(const std::array<char, MAX_NICKNAME_SIZE>& nickname,
+            io_context& context,
+            tcp::resolver::iterator ep_iterator) :
+            _context(context), _socket(context)
+{
+    strcpy(_nickname.data(), nickname.data());
+    memset(_readMsg.data(), '\0', MAX_PACK_SIZE);
+    async_connect(_socket, ep_iterator, [this](const boost::system::error_code& error, const ip::tcp::resolver::iterator& ep_iterator){
+        onConnect(error);
+    });
+    
+}
+
+void Client::Write(const std::array<char, MAX_PACK_SIZE>& msg)
+{
+    _context.post([msg, this](){onWrite(msg);});
+}
+
+void Client::Close()
+{
+    _context.post([this](){ onClose();});
+}
+void Client::onConnect(const boost::system::error_code& error)
+{
+    if (!error)
+    {
+        async_write(_socket, buffer(_nickname, _nickname.size()),
+                    [this](const boost::system::error_code& error, std::size_t bytes){ readHandler(error);});
+    }
+}
+void Client::readHandler(const boost::system::error_code& error)
+{
+    std::cout << _readMsg.data() << std::endl;
+    if (!error)
+    {
+        async_read(_socket, buffer(_readMsg, _readMsg.size()),
+                    [this](const boost::system::error_code& error, std::size_t bytes){ readHandler(error);});
+    } else
+    {
+        onClose();
+    }
+}
+
+void Client::onWrite(std::array<char, MAX_PACK_SIZE> msg)
+{
+    bool write_in_progress = !_writeQueue.empty();
+    _writeQueue.push_back(msg);
+    if (!write_in_progress)
+    {
+        async_write(_socket, buffer(_writeQueue.front(), _writeQueue.front().size()),
+                    [this](const boost::system::error_code& error, std::size_t bytes){ writeHandler(error);});
+    }
+}
+
+void Client::writeHandler(const boost::system::error_code& error)
+{
+    if (!error)
+    {
+        _writeQueue.pop_front();
+        if (!_writeQueue.empty())
+        {
+            async_write(_socket, buffer(_writeQueue.front(), _writeQueue.front().size()),
+                        [this](const boost::system::error_code& error, std::size_t bytes){ writeHandler(error);});
+        }
+    } else
+    {
+        onClose();
+    }
+}
+
+void Client::onClose()
+{
+    _socket.close();
 }
