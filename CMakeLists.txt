@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-
-project(chat VERSION 0.1 LANGUAGES CXX)
+project(Chat VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Set the path to the vspkg.json file
 set(VSPKG_JSON_PATH "${CMAKE_SOURCE_DIR}/vcpkg.json")
 
@@ -21,14 +21,16 @@ else()
 endif()
 
 find_package(Boost REQUIRED COMPONENTS system thread)
-
 add_executable(server server.cpp)
 target_link_libraries(server
  PRIVATE
  Boost::system
- Boost::thread)
+ Boost::thread
+ )
 
  add_executable(client client.cpp)
  target_link_libraries(client
-  PRIVATE
-  Boost::system)
+ PRIVATE
+ Boost::system
+ Boost::thread
+ )
